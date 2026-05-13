@@ -2,6 +2,8 @@ use zed_extension_api as zed;
 
 const SERVER_PATH: &str =
     "node_modules/@microsoft/compose-language-service/bin/docker-compose-langserver";
+const SERVER_WINDOWS_PATH: &str =
+    "node_modules/.bin/docker-compose-langserver.cmd";
 const PACKAGE_NAME: &str = "@microsoft/compose-language-service";
 
 #[derive(Default)]
@@ -10,11 +12,23 @@ struct DockerComposeExtension {
 }
 
 impl DockerComposeExtension {
-    fn server_path(&self) -> String {
+    fn path_in_extension(&self, relative_path: &str) -> String {
         zed_ext::sanitize_windows_path(std::env::current_dir().unwrap())
-            .join(SERVER_PATH)
+            .join(relative_path)
             .to_string_lossy()
             .to_string()
+    }
+
+    fn server_path(&self) -> String {
+        self.path_in_extension(SERVER_PATH)
+    }
+
+    fn server_windows_path(&self) -> String {
+        self.path_in_extension(SERVER_WINDOWS_PATH)
+    }
+
+    fn windows_cmd_path(&self) -> String {
+        std::env::var("ComSpec").unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".to_string())
     }
 
     fn install_if_needed(&mut self, language_server_id: &zed::LanguageServerId) -> zed::Result<()> {
@@ -79,9 +93,25 @@ impl zed::Extension for DockerComposeExtension {
     ) -> zed::Result<zed::Command> {
         self.install_if_needed(language_server_id)?;
 
+        let (command, args) = match zed::current_platform() {
+            (zed::Os::Windows, _) => (
+                self.windows_cmd_path(),
+                vec![
+                    "/d".to_string(),
+                    "/c".to_string(),
+                    self.server_windows_path(),
+                    "--stdio".to_string(),
+                ],
+            ),
+            _ => (
+                zed::node_binary_path()?,
+                vec![self.server_path(), "--stdio".to_string()],
+            ),
+        };
+
         Ok(zed::Command {
-            command: zed::node_binary_path()?,
-            args: vec![self.server_path(), "--stdio".to_string()],
+            command,
+            args,
             env: Default::default(),
         })
     }
